@@ -11,44 +11,14 @@
 Trọng tâm của đội là xây dựng một **Travel Planner Agent** có khả năng tự động lên lịch trình du lịch dựa trên ngân sách (Ví dụ: *"Plan a 2-day trip to Da Nang under $200"*). Agent sử dụng công cụ tìm kiếm để tra cứu địa điểm/giá cả và máy tính để cộng dồn chi phí.
 
 - **Success Rate**: Đạt 80% (16/20 test cases thành công) trên bộ dữ liệu kiểm thử.
-- **Key Outcome**: Agent khắc phục được bài toán lớn nhất của Chatbot thuần là tình trạng "ảo giác dữ liệu". Nhờ có vòng lặp ReAct kết hợp tool `search` và `calculator`, hệ thống đưa ra lịch trình có chi phí sát thực tế và luôn tuân thủ nghiêm ngặt ngân sách cho phép.
+- **Key Outcome**: Agent khắc phục được bài toán lớn nhất của Chatbot thuần là tình trạng "ảo giác dữ liệu". Nhờ có vòng lặp ReAct kết hợp tool `search` và `calculator`, hệ thống đưa ra lịch trình có chi phí sát thực tế và luôn tuân thủ nghiêm ngặt ngân sách cho phép. Phiên bản v2 của agent cũng khắc phục được sự ảo giác dữ liệu của phiên bản đầu tiên và gọi đúng vào luồng các tools.
 
 ---
 
 ## 2. System Architecture & Tooling
 
 ### 2.1 ReAct Loop Implementation
-```mermaid
-graph TD
-    A([Nhận yêu cầu: Địa điểm, Ngày, Budget]) --> B{LLM Brain\n(Phân tích & Ra quyết định)}
-    
-    %% Vòng lặp với Search
-    B -->|Action: Gọi Search Tool| C[Công cụ: Search API]
-    C -->|Observation: Trả về Giá thực tế/Ước lượng| B
-    
-    %% Vòng lặp với Calculator
-    B -->|Action: Gọi Calculator| D[Công cụ: Calculator]
-    D -->|Observation: Trả về Tổng chi phí| B
-    
-    %% Logic suy luận (Thought)
-    B --> E{LLM Reasoning:\nTổng chi phí <= Budget?}
-    E -->|No: Tối ưu lại chi phí| B
-    E -->|Yes: Tạo lịch trình| F([Final Answer: Trả về Lịch trình hoàn thiện])
-    
-    %% Cơ chế chống vòng lặp vô hạn (Guardrail)
-    B -. Kiểm tra .-> G((Guardrail:\nLoops > max_steps?))
-    G -. Vượt quá số lần lặp .-> H([Fallback: Báo cáo ngân sách bất khả thi])
-    
-    classDef brain fill:#f9d0c4,stroke:#333,stroke-width:2px;
-    classDef tool fill:#d4e6f1,stroke:#333,stroke-width:2px;
-    classDef io fill:#e8f8f5,stroke:#333,stroke-width:2px;
-    classDef guard fill:#fef9e7,stroke:#333,stroke-dasharray: 5 5;
-    
-    class B,E brain;
-    class C,D tool;
-    class A,F io;
-    class G,H guard;
-```
+![Agent flowchart](extra/flowchart.jpg)
 
 
 **Mô tả chu trình hoạt động của hệ thống:**
@@ -86,11 +56,11 @@ graph TD
 
 *Phân tích điểm yếu (Weakness) mang tính đặc thù của team: "Less strict correctness" (Không cần đúng tuyệt đối 100%).*
 
-### Case Study: Lỗi quá khắt khe với dữ liệu tìm kiếm
-- **Input**: *"Plan trip to Da Nang under $200."*
-- **Observation**: Agent gọi `search` tìm giá vé tham quan Bà Nà Hills, API trả ra text thông tin chung chung không có giá tiền rực tiếp (ví dụ: "Bà Nà Hills is great... ticket prices vary"). 
-- **Root Cause**: Ở Agent v1, hệ thống cố gắng tìm *giá chính xác đến từng xu*. Khi không tìm thấy giá chính xác, vòng lặp ReAct bị fail hoặc gọi `search` lặp lại chục lần.
-- **Fix (Hướng khắc phục)**: Nhóm đã cập nhật System Prompt để tận dụng điểm yếu (vốn dĩ là đặc thù) của bài toán hoạch định: *"Nếu công cụ tìm kiếm không trả về giá chính xác tuyệt đối, hãy ước lượng một mức giá phổ biến nhất dựa trên ngữ cảnh để tiếp tục tính toán, không cần chính xác 100% (Less strict correctness)."* Điều này giúp chu trình trơn tru hơn rất nhiều.
+### Case Study: Lỗi ảo giác dữ liệu (hallucination)
+- **Input**: *"Lên kế hoạch du lịch Sydney"*
+- **Observation**: Agent gọi `search` tìm thông tin các địa điểm, nhưng dù Sydney không có trong mock database, agent vẫn tự tạo thông tin. 
+- **Root Cause**: Ở Agent v1, do prompt trước đó chưa có constraint và hướng dẫn đầy đủ về việc parse các tiêu chí tìm kiếm và thiếu description của tool, dẫn đến việc gọi sai tool, ảo tool, dẫn đến hallucination.
+- **Fix (Hướng khắc phục)**: Nhóm đã cập nhật System Prompt để parse các filter param chính xác hơn, cập nhật description để agent không gọi tool sai luồng.
 
 ---
 
@@ -110,18 +80,19 @@ graph TD
 
 ## 6. Production Readiness Review
 
-- **Data Parsing**: Kết quả từ `search` (Search Engine API) rất lộn xộn. Khi đưa lên Production, cần có 1 lớp làm sạch HTML/Text thừa trước khi đưa vào Observation để tiết kiệm Token.
-- **Tốc độ (Latency)**: Điểm yếu là tốc độ chậm. Cần đưa thêm cơ chế hiển thị dạng "Thinking..." (Streaming logs) trên UI để giữ chân người dùng trong lúc chờ Agent thu thập giá cả phòng/vé.
+- **Data Parsing**: Data Parsing / Chuẩn hóa dữ liệu đầu vào: Kết quả trả về từ search (Search Engine API) hiện còn khá lộn xộn, thường chứa HTML thừa, ký tự nhiễu, đoạn text lặp, tiêu đề không cần thiết, hoặc nội dung không trực tiếp phục vụ cho bước lập kế hoạch. Nếu đưa lên môi trường Production, hệ thống nên có một lớp tiền xử lý riêng để làm sạch và chuẩn hóa dữ liệu trước khi đưa vào Observation. Lớp này có thể gồm các bước như loại bỏ HTML tags, cắt bỏ boilerplate text, chuẩn hóa encoding, rút gọn đoạn văn, và chỉ giữ lại các trường quan trọng như tên địa điểm, giá, thời lượng, khu vực, và ghi chú chính. Việc này không chỉ giúp đầu ra rõ ràng hơn mà còn giảm đáng kể số token phải đưa vào context, từ đó tiết kiệm chi phí và giảm nguy cơ agent bị nhiễu khi suy luận.
+- **Tốc độ (Latency)**: Một điểm yếu rõ ràng của hệ thống hiện tại là lượng dữ liệu hạn chế, đặc biệt khi agent phải gọi tool liên tiếp để thu thập thông tin như khách sạn, phương tiện di chuyển, địa điểm tham quan. Những dữ liệu này cần được gọi qua API để thu thập được thông tin chính xác từ các nguồn tin cậy. 
+- **Quan sát và giám sát hệ thống (Observability)**: Bản agent hiện đã có log, nhưng để dùng thực tế thì cần nâng cấp phần theo dõi vận hành. Mỗi phiên chạy nên được ghi lại rõ ràng theo các bước như LLM_RESPONSE, TOOL_EXECUTION, TOOL_SUCCESS, TOOL_ERROR, ANALYZE, và FINAL_ANSWER. Điều này giúp dễ debug, dễ đo reliability giữa các phiên bản agent, và cũng hỗ trợ đánh giá các lỗi như parser error, hallucination, hoặc timeout. Trong Production, các log này nên được chuẩn hóa và có thể đẩy lên dashboard hoặc hệ thống monitoring.
+- **Chi phí token và context management**: Một rủi ro khác khi mở rộng hệ thống là số lượng token tăng rất nhanh nếu giữ toàn bộ observation thô, logs, và dữ liệu tìm kiếm trong cùng một vòng lặp. Khi agent phải xử lý nhiều địa điểm hoặc nhiều danh mục cùng lúc, context có thể phình to và làm tăng chi phí suy luận. Vì vậy, ngoài lớp làm sạch dữ liệu, nên có cơ chế tóm tắt observation theo từng bước, chỉ giữ lại các trường thật sự cần cho quyết định cuối cùng.
 
 ---
 
 ## 7. Group Insights / Bài học của nhóm
 
-**1. Tính linh hoạt trong độ chính xác (Less strict correctness):**
-Với domain "Travel Planner", việc đòi hỏi chi phí phải chính xác tới từng cent là bất khả thi và dễ làm Agent sập (Infinite Loop). Bài học của nhóm là cấu hình System Prompt sao cho Agent biết cách "ước lượng" (Estimate) linh hoạt khi thông tin trả về thiếu hụt. Đây chính là nghệ thuật cân bằng giữa cấu trúc chặt chẽ (ReAct) và khả năng suy luận linh hoạt.
+**1. Prompt tốt không chỉ là hướng dẫn, mà là cơ chế kiểm soát hành vi của agent: Nhóm nhận ra rằng chỉ cần mô tả nhiệm vụ chung chung thì agent rất dễ trả lời sai format, gọi tool không đúng tham số, hoặc bỏ qua các bước cần thiết. Prompt hiệu quả phải đóng vai trò như một “quy trình vận hành”, quy định rõ thứ tự hành động, format output, và điều kiện để chuyển sang bước tiếp theo.
 
-**2. LLM rất kém toán học (Tính toán ngân sách):**
-Dù thông minh đến mấy, nếu không có tool `calculator`, LLM vẫn trừ sai tiền ngân sách cơ bản. Bài học là: Bất cứ thứ gì dính tới số liệu mang tính quyết định, bắt buộc phải biến nó thành Action gọi Tool bên ngoài.
+**2. Tool design ảnh hưởng trực tiếp đến chất lượng suy luận: Một bài học lớn là agent không chỉ phụ thuộc vào LLM mà còn phụ thuộc mạnh vào cách thiết kế tool. Nếu tool có input mơ hồ, output thiếu trường quan trọng, hoặc đơn vị dữ liệu không nhất quán, agent sẽ dễ đưa ra kế hoạch sai hoặc tính budget sai. Vì vậy, việc chuẩn hóa schema của tool quan trọng không kém việc tinh chỉnh prompt.
 
-**3. Khủng hoảng vòng lặp vô hạn (Infinite Loop) vì cố chấp:**
-Khi ngân sách là $10 (quá vô lý cho 1 chuyến đi), Agent tự động thay đổi địa điểm và gọi `search` liên tục hàng chục lần nhằm cố tìm "cho bằng được" lịch trình thỏa mãn $10. Việc này ngốn vô số API Token. Để giải quyết, nhóm phải giới hạn `max_steps = 5` và hướng dẫn Agent trả lời ngay: *"Ngân sách này không khả thi"* thay vì tìm kiếm mù quáng.
+**3. Không phải mọi lỗi đều là lỗi mô hình: Ban đầu nhóm có xu hướng nghĩ sai sót chủ yếu do LLM “hallucinate”, nhưng sau khi debug kỹ hơn, nhiều lỗi thực tế đến từ parser, mapping tool, unit mismatch, hoặc logic vòng lặp. Điều này cho thấy khi xây agent, cần nhìn hệ thống như một pipeline hoàn chỉnh chứ không chỉ tập trung vào model.
+
+**4. So sánh chatbot thường và agent giúp thấy rõ trade-off: Chatbot thường có thể trả lời nhanh hơn, nhưng agent có lợi thế ở chỗ dùng được dữ liệu có cấu trúc, kiểm tra budget, và đưa ra kế hoạch cụ thể hơn. Tuy nhiên, agent cũng phức tạp hơn nhiều về debugging, latency, và handling errors. Đây là một đánh đổi quan trọng mà nhóm hiểu rõ hơn sau quá trình làm bài.

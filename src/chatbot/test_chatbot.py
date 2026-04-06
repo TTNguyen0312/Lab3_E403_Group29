@@ -15,7 +15,7 @@ def run_chatbot_demo() -> None:
         prompt = case["prompt"]
         print(f"\n=== Test Case {index} ===")
         print(f"Case ID: {case['id']}")
-        print(f"Category: {case['category']}")
+        print(f"Type: {case['type']}")
         print(f"Difficulty: {case['difficulty']}")
         print(f"Expected Winner: {case['expected_winner']}")
         print(f"User: {prompt}")

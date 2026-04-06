@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template
-from src.agent.agent import run_agent
+from src.agent.agent_v2 import run_agent
 from src.chatbot.chatbot import run_chatbot
 
 app = Flask(__name__)

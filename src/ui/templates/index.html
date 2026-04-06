@@ -147,14 +147,9 @@
             finalBox.className = 'final-box';
             finalBox.innerHTML = (final || "No final answer").replace(/\n/g, "<br>");
 
-            const traceBox = document.createElement('div');
-            traceBox.className = 'trace-box';
-            traceBox.innerText = trace || "No reasoning trace.";
-
             agentCol.appendChild(agentTitle);
             agentCol.appendChild(finalBox);
-            agentCol.appendChild(traceBox);
-
+            
             // Combine
             row.appendChild(chatbotCol);
             row.appendChild(agentCol);
